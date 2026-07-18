@@ -571,6 +571,33 @@ static INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM 
     return FALSE;
 }
 
+static void SaveSettings() {
+    HKEY hKey;
+    if (RegCreateKeyEx(HKEY_CURRENT_USER, L"Software\\AudioConverter", 0, nullptr,
+                       REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS) {
+        DWORD fmtIdx = (DWORD)SendMessage(g_hFormatCombo, CB_GETCURSEL, 0, 0);
+        DWORD qualIdx = (DWORD)SendMessage(g_hQualityCombo, CB_GETCURSEL, 0, 0);
+        RegSetValueEx(hKey, L"FormatIndex", 0, REG_DWORD, (BYTE*)&fmtIdx, sizeof(DWORD));
+        RegSetValueEx(hKey, L"QualityIndex", 0, REG_DWORD, (BYTE*)&qualIdx, sizeof(DWORD));
+        RegCloseKey(hKey);
+    }
+}
+
+static void LoadSettings() {
+    HKEY hKey;
+    if (RegOpenKeyEx(HKEY_CURRENT_USER, L"Software\\AudioConverter", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD fmtIdx = 0, qualIdx = 2, size = sizeof(DWORD);
+        RegQueryValueEx(hKey, L"FormatIndex", nullptr, nullptr, (BYTE*)&fmtIdx, &size);
+        RegQueryValueEx(hKey, L"QualityIndex", nullptr, nullptr, (BYTE*)&qualIdx, &size);
+        RegCloseKey(hKey);
+        if (fmtIdx < sizeof(g_formats) / sizeof(g_formats[0])) {
+            SendMessage(g_hFormatCombo, CB_SETCURSEL, (WPARAM)fmtIdx, 0);
+            OnFormatChanged();
+            SendMessage(g_hQualityCombo, CB_SETCURSEL, (WPARAM)qualIdx, 0);
+        }
+    }
+}
+
 LRESULT CALLBACK BtnSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                   UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
     switch (msg) {
@@ -762,6 +789,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SendMessage(g_hCancelBtn, WM_SETFONT, (WPARAM)g_hFontBold, TRUE);
 
             OnFormatChanged();
+            LoadSettings();
 
             // Enable drag & drop
             DragAcceptFiles(hWnd, TRUE);
@@ -1024,6 +1052,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_DESTROY:
+            SaveSettings();
             DragAcceptFiles(hWnd, FALSE);
             if (g_hFFmpegProc) {
                 TerminateProcess(g_hFFmpegProc, 1);
