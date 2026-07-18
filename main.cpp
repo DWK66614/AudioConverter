@@ -8,6 +8,7 @@
 #include <commdlg.h>
 #include <uxtheme.h>
 #include <shellapi.h>
+#include <dwmapi.h>
 #include <string>
 #include <vector>
 #include <thread>
@@ -20,6 +21,7 @@
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "dwmapi.lib")
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -32,18 +34,6 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define IDM_ABOUT            2001
 #define IDM_FILE_EXIT        2002
 #define IDM_HELP_ABOUT       2003
-
-#define COLOR_BG        RGB(240, 242, 245)
-#define COLOR_CARD      RGB(255, 255, 255)
-#define COLOR_ACCENT    RGB(22,  119, 255)
-#define COLOR_ACCENT_H  RGB(64,  150, 255)
-#define COLOR_TEXT      RGB(31,  31,  31)
-#define COLOR_SUBTEXT   RGB(102, 102, 102)
-#define COLOR_BORDER    RGB(229, 231, 235)
-#define COLOR_SUCCESS   RGB(82,  196, 26)
-#define COLOR_ERROR     RGB(255, 77,  79)
-#define COLOR_WARN      RGB(250, 173, 20)
-#define COLOR_HEADER_BG RGB(22,  119, 255)
 
 struct FormatInfo {
     const wchar_t* name;
@@ -96,9 +86,51 @@ static HBRUSH g_hBrushBG     = nullptr;
 static HBRUSH g_hBrushCard   = nullptr;
 static HBRUSH g_hBrushAccent = nullptr;
 static HANDLE g_hFFmpegProc  = nullptr;
+static bool g_darkMode       = false;
 static bool g_btnHovered     = false;
 static bool g_btnPressed     = false;
 static TRACKMOUSEEVENT g_tme = { sizeof(TRACKMOUSEEVENT), TME_LEAVE, 0, 0 };
+
+static COLORREF g_colorBG, g_colorCard, g_colorAccent, g_colorAccentH;
+static COLORREF g_colorText, g_colorSubtext, g_colorBorder, g_colorHeaderBG;
+static COLORREF g_colorEditBG;
+
+static void DetectDarkMode() {
+    HKEY hKey;
+    DWORD light = 1, size = sizeof(DWORD);
+    if (RegOpenKeyEx(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        RegQueryValueEx(hKey, L"AppsUseLightTheme", nullptr, nullptr, (BYTE*)&light, &size);
+        RegCloseKey(hKey);
+    }
+    g_darkMode = (light == 0);
+}
+
+static void InitColors() {
+    DetectDarkMode();
+    if (g_darkMode) {
+        g_colorBG       = RGB(30,  30,  30);
+        g_colorCard     = RGB(45,  45,  45);
+        g_colorAccent   = RGB(64,  158, 255);
+        g_colorAccentH  = RGB(102, 177, 255);
+        g_colorText     = RGB(230, 230, 230);
+        g_colorSubtext  = RGB(160, 160, 160);
+        g_colorBorder   = RGB(60,  60,  60);
+        g_colorHeaderBG = RGB(22,  78,  140);
+        g_colorEditBG   = RGB(55,  55,  55);
+    } else {
+        g_colorBG       = RGB(240, 242, 245);
+        g_colorCard     = RGB(255, 255, 255);
+        g_colorAccent   = RGB(22,  119, 255);
+        g_colorAccentH  = RGB(64,  150, 255);
+        g_colorText     = RGB(31,  31,  31);
+        g_colorSubtext  = RGB(102, 102, 102);
+        g_colorBorder   = RGB(229, 231, 235);
+        g_colorHeaderBG = RGB(22,  119, 255);
+        g_colorEditBG   = RGB(250, 250, 250);
+    }
+}
 
 static std::atomic<bool> g_converting(false);
 static std::thread g_workerThread;
@@ -497,7 +529,7 @@ static void DrawRoundedRect(HDC hdc, RECT& r, int radius, COLORREF border, COLOR
 
 static void DrawButton(HDC hdc, RECT& r) {
     int radius = 8;
-    COLORREF bg = g_btnPressed ? COLOR_ACCENT : (g_btnHovered ? COLOR_ACCENT_H : COLOR_ACCENT);
+    COLORREF bg = g_btnPressed ? g_colorAccent : (g_btnHovered ? g_colorAccentH : g_colorAccent);
     HPEN hPen = CreatePen(PS_SOLID, 1, bg);
     HBRUSH hBrush = CreateSolidBrush(bg);
     HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
@@ -516,8 +548,8 @@ static void DrawButton(HDC hdc, RECT& r) {
 }
 
 static void DrawCard(HDC hdc, RECT& r) {
-    HPEN hPen = CreatePen(PS_SOLID, 1, COLOR_BORDER);
-    HBRUSH hBrush = CreateSolidBrush(COLOR_CARD);
+    HPEN hPen = CreatePen(PS_SOLID, 1, g_colorBorder);
+    HBRUSH hBrush = CreateSolidBrush(g_colorCard);
     HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
     HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
     RoundRect(hdc, r.left, r.top, r.right, r.bottom, 10, 10);
@@ -528,7 +560,7 @@ static void DrawCard(HDC hdc, RECT& r) {
 }
 
 static void DrawHeader(HDC hdc, RECT& r) {
-    HBRUSH hBrush = CreateSolidBrush(COLOR_HEADER_BG);
+    HBRUSH hBrush = CreateSolidBrush(g_colorHeaderBG);
     FillRect(hdc, &r, hBrush);
     DeleteObject(hBrush);
 
@@ -637,6 +669,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_hWnd = hWnd;
             HINSTANCE hInst = ((LPCREATESTRUCT)lParam)->hInstance;
             g_hInst = hInst;
+            InitColors();
 
             // Menu bar
             HMENU hMenu = CreateMenu();
@@ -657,9 +690,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_hFontTitle = CreateFont(26, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
-            g_hBrushBG = CreateSolidBrush(COLOR_BG);
-            g_hBrushCard = CreateSolidBrush(COLOR_CARD);
-            g_hBrushAccent = CreateSolidBrush(COLOR_ACCENT);
+            g_hBrushBG = CreateSolidBrush(g_colorBG);
+            g_hBrushCard = CreateSolidBrush(g_colorCard);
+            g_hBrushAccent = CreateSolidBrush(g_colorAccent);
 
             int yBase = 100;
             int gap = 8;
@@ -807,19 +840,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             HWND hCtrl = (HWND)lParam;
             SetBkMode(hdc, TRANSPARENT);
             if (hCtrl == g_hStatus) {
-                SetTextColor(hdc, COLOR_SUBTEXT);
+                SetTextColor(hdc, g_colorSubtext);
                 return (LRESULT)g_hBrushBG;
             }
-            SetTextColor(hdc, COLOR_TEXT);
+            SetTextColor(hdc, g_colorText);
             // White background for card labels (they sit on white cards)
-            SetBkColor(hdc, COLOR_CARD);
+            SetBkColor(hdc, g_colorCard);
             return (LRESULT)g_hBrushCard;
         }
 
         case WM_CTLCOLOREDIT: {
             HDC hdc = (HDC)wParam;
             SetBkColor(hdc, RGB(250, 250, 250));
-            SetTextColor(hdc, COLOR_TEXT);
+            SetTextColor(hdc, g_colorText);
             HBRUSH hBr = CreateSolidBrush(RGB(250, 250, 250));
             return (LRESULT)hBr;
         }
@@ -950,7 +983,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             RECT rc;
             GetClientRect(hWnd, &rc);
 
-            HBRUSH hBG = CreateSolidBrush(COLOR_BG);
+            HBRUSH hBG = CreateSolidBrush(g_colorBG);
             FillRect(hdc, &rc, hBG);
             DeleteObject(hBG);
 
@@ -1103,9 +1136,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     return DefWindowProc(hWnd, msg, wParam, lParam);
 }
-
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
-    (void)hPrevInstance; (void)lpCmdLine;
+    (void)hPrevInstance;
+
+    int argc;
+    LPWSTR* argv = CommandLineToArgvW(lpCmdLine, &argc);
+    if (argv) {
+        for (int i = 0; i < argc; i++) {
+            if (GetFileAttributes(argv[i]) != INVALID_FILE_ATTRIBUTES) {
+                g_batchFiles.push_back(argv[i]);
+            }
+        }
+        LocalFree(argv);
+    }
 
     INITCOMMONCONTROLSEX icc = { sizeof(INITCOMMONCONTROLSEX), ICC_PROGRESS_CLASS | ICC_STANDARD_CLASSES };
     InitCommonControlsEx(&icc);
@@ -1128,6 +1171,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
         x, y, width, height, nullptr, nullptr, hInstance, nullptr);
 
     if (!hWnd) return 1;
+
+    // Apply dark mode to title bar
+    if (g_darkMode) {
+        int dark = 1;
+        DwmSetWindowAttribute(hWnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */,
+                              &dark, sizeof(dark));
+    }
 
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
