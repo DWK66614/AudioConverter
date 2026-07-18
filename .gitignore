@@ -1,0 +1,11 @@
+*.dll
+ffmpeg.exe
+*.res
+*.obj
+*.exp
+*.lib
+*.manifest
+*.exe
+.vs/
+Debug/
+Release/

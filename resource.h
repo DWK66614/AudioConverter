@@ -1,0 +1,22 @@
+#ifndef RESOURCE_H
+#define RESOURCE_H
+
+#define IDC_INPUT_FILE      1001
+#define IDC_BROWSE_INPUT    1002
+#define IDC_FORMAT_COMBO    1003
+#define IDC_QUALITY_COMBO   1004
+#define IDC_OUTPUT_FILE     1005
+#define IDC_BROWSE_OUTPUT   1006
+#define IDC_CONVERT_BTN     1007
+#define IDC_PROGRESS_BAR    1008
+#define IDC_STATUS_TEXT     1009
+#define IDC_LOG_EDIT        1010
+#define IDC_LABEL_INPUT     1011
+#define IDC_LABEL_FORMAT    1012
+#define IDC_LABEL_QUALITY   1013
+#define IDC_LABEL_OUTPUT    1014
+#define IDC_LABEL_LOG       1015
+
+#define IDI_MAIN_ICON       2001
+
+#endif
