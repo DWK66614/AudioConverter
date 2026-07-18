@@ -28,6 +28,10 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define WM_CONVERT_DONE      (WM_USER + 2)
 #define WM_CONVERT_ERROR     (WM_USER + 3)
 
+#define IDM_ABOUT            2001
+#define IDM_FILE_EXIT        2002
+#define IDM_HELP_ABOUT       2003
+
 #define COLOR_BG        RGB(240, 242, 245)
 #define COLOR_CARD      RGB(255, 255, 255)
 #define COLOR_ACCENT    RGB(22,  119, 255)
@@ -511,6 +515,31 @@ static void DrawHeader(HDC hdc, RECT& r) {
     DrawText(hdc, L"支持 MP3 / WAV / FLAC / AAC / OGG / WMA / Opus 等主流格式互转", -1, &tr, DT_CENTER | DT_SINGLELINE);
 }
 
+static INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    (void)lParam;
+    switch (msg) {
+        case WM_INITDIALOG: {
+            SetWindowText(hDlg, L"关于 音频格式转换器");
+            SetDlgItemText(hDlg, 101, L"音频格式转换器 v1.0");
+            SetDlgItemText(hDlg, 102, L"基于 C++ 和 FFmpeg 开发的 Windows 桌面音频转换工具。\r\n\r\n"
+                                       L"支持 MP3 / WAV / FLAC / AAC / OGG / WMA / Opus\r\n"
+                                       L"7 种主流音频格式互相转换。");
+            HFONT hFont = CreateFont(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+            SendDlgItemMessage(hDlg, 101, WM_SETFONT, (WPARAM)hFont, TRUE);
+            return TRUE;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
+                EndDialog(hDlg, 0);
+                return TRUE;
+            }
+            break;
+    }
+    return FALSE;
+}
+
 LRESULT CALLBACK BtnSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                   UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
     switch (msg) {
@@ -550,6 +579,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_hWnd = hWnd;
             HINSTANCE hInst = ((LPCREATESTRUCT)lParam)->hInstance;
             g_hInst = hInst;
+
+            // Menu bar
+            HMENU hMenu = CreateMenu();
+            HMENU hFileMenu = CreatePopupMenu();
+            AppendMenu(hFileMenu, MF_STRING, IDM_FILE_EXIT, L"退出\tAlt+F4");
+            AppendMenu(hMenu, MF_STRING | MF_POPUP, (UINT_PTR)hFileMenu, L"文件(&F)");
+            HMENU hHelpMenu = CreatePopupMenu();
+            AppendMenu(hHelpMenu, MF_STRING, IDM_HELP_ABOUT, L"关于(&A)...");
+            AppendMenu(hMenu, MF_STRING | MF_POPUP, (UINT_PTR)hHelpMenu, L"帮助(&H)");
+            SetMenu(hWnd, hMenu);
 
             g_hFontNormal = CreateFont(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -758,6 +797,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     break;
                 case IDC_FORMAT_COMBO:
                     if (HIWORD(wParam) == CBN_SELCHANGE) OnFormatChanged();
+                    break;
+                case IDM_HELP_ABOUT:
+                    DialogBox(g_hInst, MAKEINTRESOURCE(DLG_ABOUT), hWnd, AboutDlgProc);
+                    break;
+                case IDM_FILE_EXIT:
+                    DestroyWindow(hWnd);
                     break;
             }
             return 0;

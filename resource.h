@@ -18,5 +18,6 @@
 #define IDC_LABEL_LOG       1015
 
 #define IDI_MAIN_ICON       2001
+#define DLG_ABOUT           3001
 
 #endif
