@@ -868,6 +868,29 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
 
+        case WM_KEYDOWN: {
+            if (wParam == VK_RETURN && !g_converting) {
+                StartConversion();
+                return 0;
+            }
+            if (wParam == VK_ESCAPE && g_converting && g_hFFmpegProc) {
+                TerminateProcess(g_hFFmpegProc, 1);
+                CloseHandle(g_hFFmpegProc);
+                g_hFFmpegProc = nullptr;
+                SetStatus(L"已取消");
+                AppendLog(L"转换已被用户取消");
+                AppendLog(L"═══════════════════════════════");
+                SendMessage(g_hProgressBar, PBM_SETMARQUEE, FALSE, 0);
+                SendMessage(g_hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
+                SendMessage(g_hProgressBar, PBM_SETPOS, 0, 0);
+                EnableControls(TRUE);
+                g_batchFiles.clear();
+                g_converting = false;
+                return 0;
+            }
+            break;
+        }
+
         case WM_APPEND_LOG: {
             if (lParam) {
                 AppendLog((const wchar_t*)lParam);
