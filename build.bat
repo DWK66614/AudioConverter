@@ -20,7 +20,7 @@ rc /nologo /fo resource.res resource.rc
 if %ERRORLEVEL% neq 0 (echo 资源编译失败! & pause & exit /b 1)
 
 echo [2/4] 编译主程序...
-cl /nologo /EHsc /std:c++17 /O2 /W3 /utf-8 main.cpp resource.res /Fe:AudioConverter.exe /link user32.lib gdi32.lib comctl32.lib comdlg32.lib uxtheme.lib shell32.lib
+cl /nologo /EHsc /std:c++17 /O2 /W3 /utf-8 main.cpp resource.res /Fe:AudioConverter.exe /link user32.lib gdi32.lib comctl32.lib comdlg32.lib uxtheme.lib shell32.lib advapi32.lib
 if %ERRORLEVEL% neq 0 (echo 编译失败! & pause & exit /b 1)
 
 echo [3/4] 清理临时文件...
