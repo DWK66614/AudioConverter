@@ -19,7 +19,7 @@
 
 ## 下载安装
 
-前往 [Releases](https://github.com/AudioConverter/AudioConverter/releases) 页面下载 `AudioConverter_Setup.exe` 安装包。
+前往 [Releases](https://github.com/DWK66614/AudioConverter/releases) 页面下载 `AudioConverter_Setup.exe` 安装包。
 
 安装包自动创建桌面快捷方式和开始菜单项，附带卸载程序。
 

@@ -51,7 +51,7 @@ static const FormatInfo g_formats[] = {
     { L"MP3",                          L".mp3",  "libmp3lame",    false },
     { L"WAV (PCM)",                    L".wav",  "pcm_s16le",     true  },
     { L"FLAC (无损)",                   L".flac", "flac",          true  },
-    { L"AAC / M4A",                    L".m4a",  "libvo_aacenc",  false },
+    { L"AAC / M4A",                    L".m4a",  "aac",           false },
     { L"OGG Vorbis",                   L".ogg",  "libvorbis",     false },
     { L"WMA",                          L".wma",  "wmav2",         false },
     { L"Opus",                         L".opus", "libopus",       false },
@@ -191,7 +191,7 @@ static void ConvertThreadProc(HWND hWnd, std::wstring inputFile, std::wstring ou
     }
     delete[] wcodec;
 
-    cmd += L" -vn -progress pipe:1 -nostats -loglevel error \"";
+    cmd += L" -strict -2 -vn -progress pipe:1 -nostats -loglevel error \"";
     cmd += outputFile;
     cmd += L"\"";
 
