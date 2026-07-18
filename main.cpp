@@ -910,7 +910,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SendMessage(g_hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
             SendMessage(g_hProgressBar, PBM_SETPOS, 100, 0);
             SetStatus(L"转换完成!");
-            AppendLog((const wchar_t*)lParam);
+            if (lParam) AppendLog((const wchar_t*)lParam);
+            if (g_batchFiles.size() > 1) {
+                wchar_t dir[MAX_PATH];
+                wcscpy(dir, g_batchFiles[0].c_str());
+                wchar_t* slash = wcsrchr(dir, L'\\');
+                if (slash) *slash = L'\0';
+                wchar_t msg[512];
+                swprintf(msg, L"输出目录: %ls", dir);
+                AppendLog(msg);
+                ShellExecute(hWnd, L"open", dir, nullptr, nullptr, SW_SHOW);
+            }
             AppendLog(L"═══════════════════════════════");
             EnableControls(TRUE);
             g_batchFiles.clear();
