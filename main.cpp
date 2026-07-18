@@ -27,6 +27,7 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define WM_CONVERT_PROGRESS  (WM_USER + 1)
 #define WM_CONVERT_DONE      (WM_USER + 2)
 #define WM_CONVERT_ERROR     (WM_USER + 3)
+#define WM_APPEND_LOG        (WM_USER + 4)
 
 #define IDM_ABOUT            2001
 #define IDM_FILE_EXIT        2002
@@ -101,6 +102,7 @@ static TRACKMOUSEEVENT g_tme = { sizeof(TRACKMOUSEEVENT), TME_LEAVE, 0, 0 };
 
 static std::atomic<bool> g_converting(false);
 static std::thread g_workerThread;
+static std::vector<std::wstring> g_batchFiles;
 
 static void EnableControls(BOOL enable) {
     EnableWindow(g_hInput,        enable);
@@ -331,16 +333,17 @@ static void ConvertThreadProc(HWND hWnd, std::wstring inputFile, std::wstring ou
 
 static void StartConversion() {
     if (g_converting) return;
-    wchar_t inputFile[MAX_PATH] = {};
-    GetWindowText(g_hInput, inputFile, MAX_PATH);
-    if (wcslen(inputFile) == 0) {
-        MessageBox(g_hWnd, L"请先选择要转换的音频文件。", L"提示", MB_ICONWARNING);
-        return;
+
+    if (g_batchFiles.empty()) {
+        wchar_t inputFile[MAX_PATH] = {};
+        GetWindowText(g_hInput, inputFile, MAX_PATH);
+        if (wcslen(inputFile) == 0) {
+            MessageBox(g_hWnd, L"请先选择要转换的音频文件。", L"提示", MB_ICONWARNING);
+            return;
+        }
+        g_batchFiles.push_back(inputFile);
     }
-    if (GetFileAttributes(inputFile) == INVALID_FILE_ATTRIBUTES) {
-        MessageBox(g_hWnd, L"输入文件不存在。", L"错误", MB_ICONWARNING);
-        return;
-    }
+
     int fmtIdx = (int)SendMessage(g_hFormatCombo, CB_GETCURSEL, 0, 0);
     if (fmtIdx < 0) fmtIdx = 0;
     const FormatInfo& fmt = g_formats[fmtIdx];
@@ -350,24 +353,12 @@ static void StartConversion() {
 
     const char* bitrate = fmt.lossless ? "" : g_qualities_lossy[qualIdx].bitrate;
 
-    wchar_t outputFile[MAX_PATH] = {};
-    GetWindowText(g_hOutput, outputFile, MAX_PATH);
-    if (wcslen(outputFile) == 0) {
-        wcscpy(outputFile, inputFile);
-        wchar_t* dot = wcsrchr(outputFile, L'.');
-        if (dot) *dot = L'\0';
-        wcscat(outputFile, fmt.ext);
-        SetWindowText(g_hOutput, outputFile);
-    }
-
     SetWindowText(g_hLog, L"");
     AppendLog(L"═══════════════════════════════");
     AppendLog(L"  音频格式转换器 - 开始转换");
     AppendLog(L"═══════════════════════════════");
     wchar_t logMsg[1024];
-    swprintf(logMsg, L"  输入文件 : %ls", inputFile);
-    AppendLog(logMsg);
-    swprintf(logMsg, L"  输出文件 : %ls", outputFile);
+    swprintf(logMsg, L"  文件数量 : %zu 个", g_batchFiles.size());
     AppendLog(logMsg);
     swprintf(logMsg, L"  输出格式 : %ls", fmt.name);
     AppendLog(logMsg);
@@ -383,28 +374,44 @@ static void StartConversion() {
     EnableControls(FALSE);
     g_converting = true;
 
-    std::wstring inFile(inputFile);
-    std::wstring outFile(outputFile);
+    std::vector<std::wstring> files = g_batchFiles;
     std::string codec(fmt.codec);
     std::string br(bitrate ? bitrate : "");
 
-    g_workerThread = std::thread([inFile, outFile, codec, br, fmt]() {
-        ConvertThreadProc(g_hWnd, inFile, outFile, codec.c_str(),
-            br.empty() ? nullptr : br.c_str(), fmt.lossless);
+    g_workerThread = std::thread([files, codec, br, fmt]() {
+        for (size_t i = 0; i < files.size() && g_converting; i++) {
+            wchar_t outFile[MAX_PATH];
+            wcscpy(outFile, files[i].c_str());
+            wchar_t* dot = wcsrchr(outFile, L'.');
+            if (dot) *dot = L'\0';
+            wcscat(outFile, fmt.ext);
+
+            wchar_t msg[1024];
+            swprintf(msg, L"[%zu/%zu] %ls", i + 1, files.size(), files[i].c_str());
+            PostMessage(g_hWnd, WM_APPEND_LOG, 0, (LPARAM)_wcsdup(msg));
+
+            ConvertThreadProc(g_hWnd, files[i], outFile, codec.c_str(),
+                br.empty() ? nullptr : br.c_str(), fmt.lossless);
+        }
+            if (g_converting) {
+                PostMessage(g_hWnd, WM_CONVERT_DONE, 0, (LPARAM)L"全部文件转换完成！");
+            }
+            g_batchFiles.clear();
+            g_converting = false;
     });
     g_workerThread.detach();
 }
 
 static void BrowseFile(HWND hEdit, BOOL save) {
-    wchar_t file[MAX_PATH] = {};
-    GetWindowText(hEdit, file, MAX_PATH);
+    wchar_t file[32768] = {};
+    GetWindowText(hEdit, file, 32768);
     OPENFILENAME ofn = { sizeof(OPENFILENAME) };
     ofn.hwndOwner = g_hWnd;
     ofn.lpstrFilter = L"音频文件\0*.wav;*.mp3;*.flac;*.aac;*.m4a;*.ogg;*.opus;*.wma;*.wmv;*.asf;*.aiff;*.aif;*.ape;*.wv\0"
                        "所有文件\0*.*\0";
     ofn.lpstrFile = file;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+    ofn.nMaxFile = 32768;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ALLOWMULTISELECT | OFN_EXPLORER;
     if (save) {
         int fmtIdx = (int)SendMessage(g_hFormatCombo, CB_GETCURSEL, 0, 0);
         if (fmtIdx < 0) fmtIdx = 0;
@@ -413,15 +420,39 @@ static void BrowseFile(HWND hEdit, BOOL save) {
         if (GetSaveFileName(&ofn)) SetWindowText(hEdit, file);
     } else {
         if (GetOpenFileName(&ofn)) {
-            SetWindowText(hEdit, file);
-            wchar_t outputFile[MAX_PATH];
-            wcscpy(outputFile, file);
-            wchar_t* dot = wcsrchr(outputFile, L'.');
-            if (dot) *dot = L'\0';
-            int fmtIdx = (int)SendMessage(g_hFormatCombo, CB_GETCURSEL, 0, 0);
-            if (fmtIdx < 0) fmtIdx = 0;
-            wcscat(outputFile, g_formats[fmtIdx].ext);
-            SetWindowText(g_hOutput, outputFile);
+            g_batchFiles.clear();
+            wchar_t* p = file;
+            wchar_t dir[MAX_PATH];
+            wcscpy(dir, p);
+            p += wcslen(p) + 1;
+            if (*p == L'\0') {
+                g_batchFiles.push_back(dir);
+                SetWindowText(hEdit, dir);
+            } else {
+                int n = 0;
+                wchar_t firstFile[MAX_PATH];
+                while (*p) {
+                    wchar_t fullPath[MAX_PATH];
+                    swprintf(fullPath, L"%ls\\%ls", dir, p);
+                    g_batchFiles.push_back(fullPath);
+                    if (n == 0) { wcscpy(firstFile, fullPath); SetWindowText(hEdit, fullPath); }
+                    p += wcslen(p) + 1;
+                    n++;
+                }
+                wchar_t info[128];
+                swprintf(info, L"已选择 %d 个文件", n);
+                SetStatus(info);
+            }
+            if (!g_batchFiles.empty()) {
+                wchar_t outputFile[MAX_PATH];
+                wcscpy(outputFile, g_batchFiles[0].c_str());
+                wchar_t* dot = wcsrchr(outputFile, L'.');
+                if (dot) *dot = L'\0';
+                int fmtIdx = (int)SendMessage(g_hFormatCombo, CB_GETCURSEL, 0, 0);
+                if (fmtIdx < 0) fmtIdx = 0;
+                wcscat(outputFile, g_formats[fmtIdx].ext);
+                SetWindowText(g_hOutput, outputFile);
+            }
         }
     }
 }
@@ -790,6 +821,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         SendMessage(g_hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
                         SendMessage(g_hProgressBar, PBM_SETPOS, 0, 0);
                         EnableControls(TRUE);
+                        g_batchFiles.clear();
                         g_converting = false;
                     } else {
                         StartConversion();
@@ -808,6 +840,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
 
+        case WM_APPEND_LOG: {
+            if (lParam) {
+                AppendLog((const wchar_t*)lParam);
+                free((void*)lParam);
+            }
+            return 0;
+        }
+
         case WM_CONVERT_PROGRESS: {
             int progress = (int)wParam;
             (void)progress;
@@ -822,6 +862,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             AppendLog((const wchar_t*)lParam);
             AppendLog(L"═══════════════════════════════");
             EnableControls(TRUE);
+            g_batchFiles.clear();
             g_converting = false;
             return 0;
         }
@@ -837,6 +878,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             AppendLog(L"═══════════════════════════════");
             EnableControls(TRUE);
+            g_batchFiles.clear();
             g_converting = false;
             return 0;
         }
@@ -961,19 +1003,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_DROPFILES: {
             HDROP hDrop = (HDROP)wParam;
+            UINT count = DragQueryFile(hDrop, 0xFFFFFFFF, nullptr, 0);
+            g_batchFiles.clear();
             wchar_t file[MAX_PATH];
-            if (DragQueryFile(hDrop, 0, file, MAX_PATH) > 0) {
-                SetWindowText(g_hInput, file);
-                wchar_t outputFile[MAX_PATH];
-                wcscpy(outputFile, file);
-                wchar_t* dot = wcsrchr(outputFile, L'.');
-                if (dot) *dot = L'\0';
-                int fmtIdx = (int)SendMessage(g_hFormatCombo, CB_GETCURSEL, 0, 0);
-                if (fmtIdx < 0) fmtIdx = 0;
-                wcscat(outputFile, g_formats[fmtIdx].ext);
-                SetWindowText(g_hOutput, outputFile);
+            for (UINT i = 0; i < count; i++) {
+                if (DragQueryFile(hDrop, i, file, MAX_PATH) > 0) {
+                    g_batchFiles.push_back(file);
+                }
             }
             DragFinish(hDrop);
+            if (!g_batchFiles.empty()) {
+                SetWindowText(g_hInput, g_batchFiles[0].c_str());
+                if (g_batchFiles.size() > 1) {
+                    wchar_t info[128];
+                    swprintf(info, L"已拖入 %zu 个文件", g_batchFiles.size());
+                    SetStatus(info);
+                }
+            }
             return 0;
         }
 
