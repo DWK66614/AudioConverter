@@ -85,14 +85,22 @@ static HFONT g_hFontTitle    = nullptr;
 static HBRUSH g_hBrushBG     = nullptr;
 static HBRUSH g_hBrushCard   = nullptr;
 static HBRUSH g_hBrushAccent = nullptr;
+static HBRUSH g_hBrushEditBG = nullptr;
 static HANDLE g_hFFmpegProc  = nullptr;
 static bool g_darkMode       = false;
 static bool g_btnHovered     = false;
 static bool g_btnPressed     = false;
+static float g_btnAnimT      = 0.0f;   // 0..1 animation progress
 static TRACKMOUSEEVENT g_tme = { sizeof(TRACKMOUSEEVENT), TME_LEAVE, 0, 0 };
 
+// Browse button hover states (per-button)
+static bool g_browse1Hovered = false, g_browse2Hovered = false;
+
+// Card shadow colors
+static COLORREF g_colorShadow;
+
 static COLORREF g_colorBG, g_colorCard, g_colorAccent, g_colorAccentH;
-static COLORREF g_colorText, g_colorSubtext, g_colorBorder, g_colorHeaderBG;
+static COLORREF g_colorText, g_colorSubtext, g_colorBorder, g_colorHeaderBG, g_colorHeaderBG2;
 static COLORREF g_colorEditBG;
 
 static void DetectDarkMode() {
@@ -110,25 +118,31 @@ static void DetectDarkMode() {
 static void InitColors() {
     DetectDarkMode();
     if (g_darkMode) {
-        g_colorBG       = RGB(30,  30,  30);
-        g_colorCard     = RGB(45,  45,  45);
-        g_colorAccent   = RGB(64,  158, 255);
-        g_colorAccentH  = RGB(102, 177, 255);
-        g_colorText     = RGB(230, 230, 230);
-        g_colorSubtext  = RGB(160, 160, 160);
-        g_colorBorder   = RGB(60,  60,  60);
-        g_colorHeaderBG = RGB(22,  78,  140);
-        g_colorEditBG   = RGB(55,  55,  55);
+        // Slate/Indigo dark — refined modern palette
+        g_colorBG        = RGB(15,  23,  42);   // slate-900
+        g_colorCard      = RGB(30,  41,  59);   // slate-800
+        g_colorAccent    = RGB(129, 140, 248);  // indigo-400
+        g_colorAccentH   = RGB(165, 180, 252);  // indigo-300
+        g_colorText      = RGB(226, 232, 240);  // slate-200
+        g_colorSubtext   = RGB(148, 163, 184);  // slate-400
+        g_colorBorder    = RGB(51,  65,  85);   // slate-700
+        g_colorHeaderBG  = RGB(49,  46,  129);  // indigo-900
+        g_colorHeaderBG2 = RGB(30,  27,  75);   // indigo-950
+        g_colorEditBG    = RGB(51,  65,  85);   // slate-700
+        g_colorShadow    = RGB(0,   0,   0);
     } else {
-        g_colorBG       = RGB(240, 242, 245);
-        g_colorCard     = RGB(255, 255, 255);
-        g_colorAccent   = RGB(22,  119, 255);
-        g_colorAccentH  = RGB(64,  150, 255);
-        g_colorText     = RGB(31,  31,  31);
-        g_colorSubtext  = RGB(102, 102, 102);
-        g_colorBorder   = RGB(229, 231, 235);
-        g_colorHeaderBG = RGB(22,  119, 255);
-        g_colorEditBG   = RGB(250, 250, 250);
+        // Slate/Indigo light — airy, minimal
+        g_colorBG        = RGB(248, 250, 252);  // slate-50
+        g_colorCard      = RGB(255, 255, 255);  // white
+        g_colorAccent    = RGB(99,  102, 241);  // indigo-500
+        g_colorAccentH   = RGB(129, 140, 248);  // indigo-400
+        g_colorText      = RGB(30,  41,  59);   // slate-800
+        g_colorSubtext   = RGB(100, 116, 139);  // slate-500
+        g_colorBorder    = RGB(226, 232, 240);  // slate-200
+        g_colorHeaderBG  = RGB(79,  70,  229);  // indigo-600
+        g_colorHeaderBG2 = RGB(67,  56,  202);  // indigo-700
+        g_colorEditBG    = RGB(241, 245, 249);  // slate-100
+        g_colorShadow    = RGB(148, 163, 184);  // slate-400 (light shadow)
     }
 }
 
@@ -527,9 +541,50 @@ static void DrawRoundedRect(HDC hdc, RECT& r, int radius, COLORREF border, COLOR
     DeleteObject(hBrush);
 }
 
-static void DrawButton(HDC hdc, RECT& r) {
+static void DrawButton(HDC hdc, RECT& r, bool hovered, bool pressed) {
+    int radius = 10;
+
+    // Interpolate color for smooth hover/press
+    COLORREF baseCol = g_colorAccent;
+    if (pressed) {
+        // Darken slightly on press
+        int rC = max(0, (int)GetRValue(baseCol) - 20);
+        int gC = max(0, (int)GetGValue(baseCol) - 20);
+        int bC = max(0, (int)GetBValue(baseCol) - 20);
+        baseCol = RGB(rC, gC, bC);
+    } else if (hovered) {
+        baseCol = g_colorAccentH;
+    }
+
+    // Slight scale on hover
+    RECT br = r;
+    if (hovered && !pressed) {
+        int inflate = 1;
+        br.left -= inflate; br.top -= inflate;
+        br.right += inflate; br.bottom += inflate;
+    }
+
+    HPEN hPen = CreatePen(PS_SOLID, 1, baseCol);
+    HBRUSH hBrush = CreateSolidBrush(baseCol);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
+    RoundRect(hdc, br.left, br.top, br.right, br.bottom, radius, radius);
+    SelectObject(hdc, hOldPen);
+    SelectObject(hdc, hOldBrush);
+    DeleteObject(hPen);
+    DeleteObject(hBrush);
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(255, 255, 255));
+    SelectObject(hdc, g_hFontBold);
+    wchar_t text[] = L"开始转换";
+    DrawText(hdc, text, -1, &br, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+// Draw a small rounded button (for browse buttons)
+static void DrawSmallButton(HDC hdc, RECT& r, bool hovered, const wchar_t* text) {
     int radius = 8;
-    COLORREF bg = g_btnPressed ? g_colorAccent : (g_btnHovered ? g_colorAccentH : g_colorAccent);
+    COLORREF bg = hovered ? g_colorAccent : g_colorSubtext;
     HPEN hPen = CreatePen(PS_SOLID, 1, bg);
     HBRUSH hBrush = CreateSolidBrush(bg);
     HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
@@ -542,17 +597,30 @@ static void DrawButton(HDC hdc, RECT& r) {
 
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(255, 255, 255));
-    SelectObject(hdc, g_hFontBold);
-    wchar_t text[] = L"开始转换";
+    SelectObject(hdc, g_hFontNormal);
     DrawText(hdc, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
 static void DrawCard(HDC hdc, RECT& r) {
+    // Shadow — offset 3px down-right, semi-transparent feel via lighter/darker
+    RECT sh = r;
+    sh.left += 3; sh.top += 3; sh.right += 3; sh.bottom += 3;
+    HPEN hPenSh = CreatePen(PS_SOLID, 1, g_colorShadow);
+    HBRUSH hBrushSh = CreateSolidBrush(g_colorShadow);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hPenSh);
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrushSh);
+    RoundRect(hdc, sh.left, sh.top, sh.right, sh.bottom, 12, 12);
+    SelectObject(hdc, hOldPen);
+    SelectObject(hdc, hOldBrush);
+    DeleteObject(hPenSh);
+    DeleteObject(hBrushSh);
+
+    // Card body
     HPEN hPen = CreatePen(PS_SOLID, 1, g_colorBorder);
     HBRUSH hBrush = CreateSolidBrush(g_colorCard);
-    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
-    RoundRect(hdc, r.left, r.top, r.right, r.bottom, 10, 10);
+    SelectObject(hdc, hPen);
+    SelectObject(hdc, hBrush);
+    RoundRect(hdc, r.left, r.top, r.right, r.bottom, 12, 12);
     SelectObject(hdc, hOldPen);
     SelectObject(hdc, hOldBrush);
     DeleteObject(hPen);
@@ -560,21 +628,34 @@ static void DrawCard(HDC hdc, RECT& r) {
 }
 
 static void DrawHeader(HDC hdc, RECT& r) {
-    HBRUSH hBrush = CreateSolidBrush(g_colorHeaderBG);
-    FillRect(hdc, &r, hBrush);
-    DeleteObject(hBrush);
+    // Gradient from HeaderBG (top) to HeaderBG2 (bottom)
+    int h = r.bottom - r.top;
+    for (int i = 0; i < h; i++) {
+        float t = (float)i / (float)h;
+        int rCol = (int)(GetRValue(g_colorHeaderBG) + t * (GetRValue(g_colorHeaderBG2) - GetRValue(g_colorHeaderBG)));
+        int gCol = (int)(GetGValue(g_colorHeaderBG) + t * (GetGValue(g_colorHeaderBG2) - GetGValue(g_colorHeaderBG)));
+        int bCol = (int)(GetBValue(g_colorHeaderBG) + t * (GetBValue(g_colorHeaderBG2) - GetBValue(g_colorHeaderBG)));
+        HPEN hPen = CreatePen(PS_SOLID, 1, RGB(rCol, gCol, bCol));
+        HPEN hOld = (HPEN)SelectObject(hdc, hPen);
+        MoveToEx(hdc, r.left, r.top + i, nullptr);
+        LineTo(hdc, r.right, r.top + i);
+        SelectObject(hdc, hOld);
+        DeleteObject(hPen);
+    }
 
+    // Title text
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(255, 255, 255));
     SelectObject(hdc, g_hFontTitle);
 
     RECT tr = r;
-    tr.top += 14;
+    tr.top += 12;
     DrawText(hdc, L"音频格式转换器", -1, &tr, DT_CENTER | DT_SINGLELINE);
 
-    tr.top += 34;
+    // Subtitle
+    tr.top += 36;
     SelectObject(hdc, g_hFontNormal);
-    SetTextColor(hdc, RGB(200, 220, 255));
+    SetTextColor(hdc, RGB(199, 210, 254));  // indigo-200
     DrawText(hdc, L"支持 MP3 / WAV / FLAC / AAC / OGG / WMA / Opus 等主流格式互转", -1, &tr, DT_CENTER | DT_SINGLELINE);
 }
 
@@ -634,25 +715,49 @@ LRESULT CALLBACK BtnSubclassProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                                   UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
     switch (msg) {
         case WM_MOUSEMOVE:
-            if (!g_btnHovered) { g_btnHovered = true; InvalidateRect(hWnd, nullptr, FALSE); }
+            if (uIdSubclass == 1) {
+                if (!g_btnHovered) { g_btnHovered = true; InvalidateRect(hWnd, nullptr, FALSE); }
+            } else if (uIdSubclass == 2) {
+                if (!g_browse1Hovered) { g_browse1Hovered = true; InvalidateRect(hWnd, nullptr, FALSE); }
+            } else if (uIdSubclass == 3) {
+                if (!g_browse2Hovered) { g_browse2Hovered = true; InvalidateRect(hWnd, nullptr, FALSE); }
+            }
             TrackMouseEvent(&g_tme);
             break;
         case WM_MOUSELEAVE:
-            g_btnHovered = false; g_btnPressed = false;
+            if (uIdSubclass == 1) {
+                g_btnHovered = false; g_btnPressed = false;
+            } else if (uIdSubclass == 2) {
+                g_browse1Hovered = false;
+            } else if (uIdSubclass == 3) {
+                g_browse2Hovered = false;
+            }
             InvalidateRect(hWnd, nullptr, FALSE);
             break;
         case WM_LBUTTONDOWN:
-            g_btnPressed = true; InvalidateRect(hWnd, nullptr, FALSE);
+            if (uIdSubclass == 1) {
+                g_btnPressed = true;
+            }
+            InvalidateRect(hWnd, nullptr, FALSE);
             break;
         case WM_LBUTTONUP:
-            g_btnPressed = false; InvalidateRect(hWnd, nullptr, FALSE);
+            if (uIdSubclass == 1) {
+                g_btnPressed = false;
+            }
+            InvalidateRect(hWnd, nullptr, FALSE);
             break;
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
             RECT r;
             GetClientRect(hWnd, &r);
-            DrawButton(hdc, r);
+            if (uIdSubclass == 1) {
+                DrawButton(hdc, r, g_btnHovered, g_btnPressed);
+            } else if (uIdSubclass == 2) {
+                DrawSmallButton(hdc, r, g_browse1Hovered, L"浏览...");
+            } else if (uIdSubclass == 3) {
+                DrawSmallButton(hdc, r, g_browse2Hovered, L"浏览...");
+            }
             EndPaint(hWnd, &ps);
             return 0;
         }
@@ -694,41 +799,42 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_hBrushCard = CreateSolidBrush(g_colorCard);
             g_hBrushAccent = CreateSolidBrush(g_colorAccent);
 
-            int yBase = 100;
-            int gap = 8;
-            int card1H = 90;
+            int yBase = 104;
+            int gap = 10;
+            int card1H = 96;
             int card2Top = yBase + card1H + gap;
-            int card2H = 230;
+            int card2H = 240;
 
             // Card 1 - Input file label
             CreateWindow(L"STATIC", L"输入文件",
                 WS_CHILD | WS_VISIBLE,
-                30, yBase + 12, 150, 24, hWnd, (HMENU)IDC_LABEL_INPUT, hInst, nullptr);
+                36, yBase + 14, 150, 24, hWnd, (HMENU)IDC_LABEL_INPUT, hInst, nullptr);
 
             // Input file edit
             g_hInput = CreateWindowEx(0, L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-                30, yBase + 40, 470, 32, hWnd, (HMENU)IDC_INPUT_FILE, hInst, nullptr);
+                36, yBase + 44, 460, 34, hWnd, (HMENU)IDC_INPUT_FILE, hInst, nullptr);
 
-            // Browse input
-            CreateWindow(L"BUTTON", L"浏览...",
+            // Browse input (will be subclassed)
+            HWND hBrowse1 = CreateWindow(L"BUTTON", L"",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-                510, yBase + 39, 100, 34, hWnd, (HMENU)IDC_BROWSE_INPUT, hInst, nullptr);
+                506, yBase + 43, 100, 36, hWnd, (HMENU)IDC_BROWSE_INPUT, hInst, nullptr);
+            SetWindowSubclass(hBrowse1, BtnSubclassProc, 2, 0);
 
             // Card 2 title
             CreateWindow(L"STATIC", L"输出设置",
                 WS_CHILD | WS_VISIBLE,
-                30, card2Top + 14, 150, 24, hWnd, (HMENU)IDC_LABEL_LOG, hInst, nullptr);
+                36, card2Top + 16, 150, 24, hWnd, (HMENU)IDC_LABEL_LOG, hInst, nullptr);
 
             // Format label
             CreateWindow(L"STATIC", L"输出格式",
                 WS_CHILD | WS_VISIBLE,
-                30, card2Top + 46, 100, 22, hWnd, (HMENU)IDC_LABEL_FORMAT, hInst, nullptr);
+                36, card2Top + 50, 100, 22, hWnd, (HMENU)IDC_LABEL_FORMAT, hInst, nullptr);
 
             // Format combo
             g_hFormatCombo = CreateWindow(L"COMBOBOX", L"",
                 WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                30, card2Top + 66, 235, 200, hWnd, (HMENU)IDC_FORMAT_COMBO, hInst, nullptr);
+                36, card2Top + 72, 225, 200, hWnd, (HMENU)IDC_FORMAT_COMBO, hInst, nullptr);
 
             for (auto& fmt : g_formats)
                 SendMessage(g_hFormatCombo, CB_ADDSTRING, 0, (LPARAM)fmt.name);
@@ -737,12 +843,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Quality label
             CreateWindow(L"STATIC", L"音质",
                 WS_CHILD | WS_VISIBLE,
-                280, card2Top + 46, 100, 22, hWnd, (HMENU)IDC_LABEL_QUALITY, hInst, nullptr);
+                276, card2Top + 50, 100, 22, hWnd, (HMENU)IDC_LABEL_QUALITY, hInst, nullptr);
 
             // Quality combo
             g_hQualityCombo = CreateWindow(L"COMBOBOX", L"",
                 WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                280, card2Top + 66, 235, 200, hWnd, (HMENU)IDC_QUALITY_COMBO, hInst, nullptr);
+                276, card2Top + 72, 225, 200, hWnd, (HMENU)IDC_QUALITY_COMBO, hInst, nullptr);
 
             for (auto& q : g_qualities_lossy)
                 SendMessage(g_hQualityCombo, CB_ADDSTRING, 0, (LPARAM)q.name);
@@ -751,47 +857,48 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Output path label
             CreateWindow(L"STATIC", L"输出路径",
                 WS_CHILD | WS_VISIBLE,
-                30, card2Top + 112, 100, 22, hWnd, (HMENU)IDC_LABEL_OUTPUT, hInst, nullptr);
+                36, card2Top + 118, 100, 22, hWnd, (HMENU)IDC_LABEL_OUTPUT, hInst, nullptr);
 
             // Output file edit
             g_hOutput = CreateWindowEx(0, L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_TABSTOP,
-                30, card2Top + 132, 470, 32, hWnd, (HMENU)IDC_OUTPUT_FILE, hInst, nullptr);
+                36, card2Top + 140, 460, 34, hWnd, (HMENU)IDC_OUTPUT_FILE, hInst, nullptr);
 
-            // Browse output
-            CreateWindow(L"BUTTON", L"浏览...",
+            // Browse output (will be subclassed)
+            HWND hBrowse2 = CreateWindow(L"BUTTON", L"",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-                510, card2Top + 131, 100, 34, hWnd, (HMENU)IDC_BROWSE_OUTPUT, hInst, nullptr);
+                506, card2Top + 139, 100, 36, hWnd, (HMENU)IDC_BROWSE_OUTPUT, hInst, nullptr);
+            SetWindowSubclass(hBrowse2, BtnSubclassProc, 3, 0);
 
             // Convert button
             g_hConvertBtn = CreateWindow(L"BUTTON", L"",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
-                195, card2Top + 182, 260, 48, hWnd, (HMENU)IDC_CONVERT_BTN, hInst, nullptr);
+                195, card2Top + 192, 270, 50, hWnd, (HMENU)IDC_CONVERT_BTN, hInst, nullptr);
 
             // Cancel button (hidden)
             g_hCancelBtn = CreateWindow(L"BUTTON", L"取消转换",
                 WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP,
-                195, card2Top + 182, 260, 48, hWnd, (HMENU)IDC_CONVERT_BTN, hInst, nullptr);
+                195, card2Top + 192, 270, 50, hWnd, (HMENU)IDC_CONVERT_BTN, hInst, nullptr);
             ShowWindow(g_hCancelBtn, SW_HIDE);
 
             // Progress bar
-            int barY = card2Top + card2H + 10;
+            int barY = card2Top + card2H + 14;
             g_hProgressBar = CreateWindow(PROGRESS_CLASS, L"",
                 WS_CHILD | WS_VISIBLE | PBS_MARQUEE,
-                30, barY, 580, 24, hWnd, (HMENU)IDC_PROGRESS_BAR, hInst, nullptr);
+                36, barY, 570, 26, hWnd, (HMENU)IDC_PROGRESS_BAR, hInst, nullptr);
             SendMessage(g_hProgressBar, PBM_SETMARQUEE, TRUE, 30);
 
             // Status
             g_hStatus = CreateWindow(L"STATIC", L"就绪 - 请选择文件开始转换",
                 WS_CHILD | WS_VISIBLE | SS_CENTER,
-                30, barY + 30, 580, 26, hWnd, (HMENU)IDC_STATUS_TEXT, hInst, nullptr);
+                36, barY + 34, 570, 26, hWnd, (HMENU)IDC_STATUS_TEXT, hInst, nullptr);
 
             // Log
-            int logY = barY + 62;
+            int logY = barY + 68;
             g_hLog = CreateWindowEx(0, L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL |
                 ES_READONLY | WS_VSCROLL | WS_TABSTOP,
-                30, logY, 580, 120, hWnd, (HMENU)IDC_LOG_EDIT, hInst, nullptr);
+                36, logY, 570, 120, hWnd, (HMENU)IDC_LOG_EDIT, hInst, nullptr);
 
             // Apply normal font to all children
             EnumChildWindows(hWnd, [](HWND hChild, LPARAM lParam) -> BOOL {
@@ -841,26 +948,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SetBkMode(hdc, TRANSPARENT);
             if (hCtrl == g_hStatus) {
                 SetTextColor(hdc, g_colorSubtext);
+                SetBkColor(hdc, g_colorBG);
                 return (LRESULT)g_hBrushBG;
             }
             SetTextColor(hdc, g_colorText);
-            // White background for card labels (they sit on white cards)
             SetBkColor(hdc, g_colorCard);
             return (LRESULT)g_hBrushCard;
         }
 
         case WM_CTLCOLOREDIT: {
             HDC hdc = (HDC)wParam;
-            SetBkColor(hdc, RGB(250, 250, 250));
+            HWND hCtrl = (HWND)lParam;
+            SetBkColor(hdc, g_colorEditBG);
             SetTextColor(hdc, g_colorText);
-            HBRUSH hBr = CreateSolidBrush(RGB(250, 250, 250));
-            return (LRESULT)hBr;
+            if (!g_hBrushEditBG) g_hBrushEditBG = CreateSolidBrush(g_colorEditBG);
+            // Check if brush color is stale (theme changed)
+            return (LRESULT)g_hBrushEditBG;
         }
 
         case WM_CTLCOLORBTN: {
             HDC hdc = (HDC)wParam;
             SetBkMode(hdc, TRANSPARENT);
             return (LRESULT)g_hBrushBG;
+        }
+
+        case WM_CTLCOLORLISTBOX: {
+            HDC hdc = (HDC)wParam;
+            SetBkColor(hdc, g_colorCard);
+            SetTextColor(hdc, g_colorText);
+            return (LRESULT)g_hBrushCard;
         }
 
         case WM_COMMAND: {
@@ -989,21 +1105,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             // Header
             RECT hdr = rc;
-            hdr.bottom = 84;
+            hdr.bottom = 88;
             DrawHeader(hdc, hdr);
 
-            int yBase = 100;
-            int gap = 8;
-            int card1H = 90;
+            int yBase = 104;
+            int gap = 10;
+            int card1H = 96;
             int card2Top = yBase + card1H + gap;
-            int card2H = 230;
+            int card2H = 240;
 
             // Card 1: Input
-            RECT card1 = { 15, yBase, rc.right - 15, yBase + card1H };
+            RECT card1 = { 20, yBase, rc.right - 20, yBase + card1H };
             DrawCard(hdc, card1);
 
             // Card 2: Settings
-            RECT card2 = { 15, card2Top, rc.right - 15, card2Top + card2H };
+            RECT card2 = { 20, card2Top, rc.right - 20, card2Top + card2H };
             DrawCard(hdc, card2);
 
             EndPaint(hWnd, &ps);
@@ -1015,8 +1131,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_GETMINMAXINFO: {
             MINMAXINFO* mmi = (MINMAXINFO*)lParam;
-            mmi->ptMinTrackSize.x = 550;
-            mmi->ptMinTrackSize.y = 550;
+            mmi->ptMinTrackSize.x = 600;
+            mmi->ptMinTrackSize.y = 580;
             return 0;
         }
 
@@ -1025,14 +1141,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int h = HIWORD(lParam);
             if (w == 0 || h == 0) return 0;
 
-            int yBase = 100;
-            int cardPad = 15;
-            int innerPad = 30;
+            int yBase = 104;
+            int cardPad = 20;
+            int innerPad = 36;
             int btnW = 100;
-            int gapV = 8;
-            int card1H = 90;
+            int gapV = 10;
+            int card1H = 96;
             int card2Top = yBase + card1H + gapV;
-            int card2H = 230;
+            int card2H = 240;
 
             // Card 1
             RECT card1 = { cardPad, yBase, w - cardPad, yBase + card1H };
@@ -1041,52 +1157,52 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int editW = w - innerPad - btnW - 10 - innerPad;
 
             SetWindowPos(GetDlgItem(hWnd, IDC_LABEL_INPUT), nullptr,
-                innerPad, yBase + 12, 200, 24, SWP_NOZORDER);
+                innerPad, yBase + 14, 200, 24, SWP_NOZORDER);
             SetWindowPos(g_hInput, nullptr,
-                innerPad, yBase + 40, editW, 32, SWP_NOZORDER);
+                innerPad, yBase + 44, editW, 34, SWP_NOZORDER);
             SetWindowPos(GetDlgItem(hWnd, IDC_BROWSE_INPUT), nullptr,
-                innerPad + editW + 10, yBase + 39, btnW, 34, SWP_NOZORDER);
+                innerPad + editW + 10, yBase + 43, btnW, 36, SWP_NOZORDER);
 
             // Card 2
             RECT card2 = { cardPad, card2Top, w - cardPad, card2Top + card2H };
             InvalidateRect(hWnd, &card2, FALSE);
 
             SetWindowPos(GetDlgItem(hWnd, IDC_LABEL_LOG), nullptr,
-                innerPad, card2Top + 14, 200, 24, SWP_NOZORDER);
+                innerPad, card2Top + 16, 200, 24, SWP_NOZORDER);
 
             SetWindowPos(GetDlgItem(hWnd, IDC_LABEL_FORMAT), nullptr,
-                innerPad, card2Top + 46, 100, 22, SWP_NOZORDER);
+                innerPad, card2Top + 50, 100, 22, SWP_NOZORDER);
             int halfW = (w - innerPad * 2 - 10) / 2;
             SetWindowPos(g_hFormatCombo, nullptr,
-                innerPad, card2Top + 66, halfW, 200, SWP_NOZORDER);
+                innerPad, card2Top + 72, halfW, 200, SWP_NOZORDER);
 
             SetWindowPos(GetDlgItem(hWnd, IDC_LABEL_QUALITY), nullptr,
-                innerPad + halfW + 10, card2Top + 46, 100, 22, SWP_NOZORDER);
+                innerPad + halfW + 10, card2Top + 50, 100, 22, SWP_NOZORDER);
             SetWindowPos(g_hQualityCombo, nullptr,
-                innerPad + halfW + 10, card2Top + 66, halfW, 200, SWP_NOZORDER);
+                innerPad + halfW + 10, card2Top + 72, halfW, 200, SWP_NOZORDER);
 
             SetWindowPos(GetDlgItem(hWnd, IDC_LABEL_OUTPUT), nullptr,
-                innerPad, card2Top + 112, 100, 22, SWP_NOZORDER);
+                innerPad, card2Top + 118, 100, 22, SWP_NOZORDER);
             SetWindowPos(g_hOutput, nullptr,
-                innerPad, card2Top + 132, editW, 32, SWP_NOZORDER);
+                innerPad, card2Top + 140, editW, 34, SWP_NOZORDER);
             SetWindowPos(GetDlgItem(hWnd, IDC_BROWSE_OUTPUT), nullptr,
-                innerPad + editW + 10, card2Top + 131, btnW, 34, SWP_NOZORDER);
+                innerPad + editW + 10, card2Top + 139, btnW, 36, SWP_NOZORDER);
 
             // Convert + Cancel buttons
             SetWindowPos(g_hConvertBtn, nullptr,
-                (w - 260) / 2, card2Top + 182, 260, 48, SWP_NOZORDER);
+                (w - 270) / 2, card2Top + 192, 270, 50, SWP_NOZORDER);
             SetWindowPos(g_hCancelBtn, nullptr,
-                (w - 260) / 2, card2Top + 182, 260, 48, SWP_NOZORDER);
+                (w - 270) / 2, card2Top + 192, 270, 50, SWP_NOZORDER);
 
             // Progress / Status / Log
-            int barY = card2Top + card2H + 10;
+            int barY = card2Top + card2H + 14;
             SetWindowPos(g_hProgressBar, nullptr,
-                innerPad, barY, w - innerPad * 2, 24, SWP_NOZORDER);
+                innerPad, barY, w - innerPad * 2, 26, SWP_NOZORDER);
             SetWindowPos(g_hStatus, nullptr,
-                innerPad, barY + 30, w - innerPad * 2, 26, SWP_NOZORDER);
+                innerPad, barY + 34, w - innerPad * 2, 26, SWP_NOZORDER);
 
-            int logY = barY + 62;
-            int logH = h - logY - 15;
+            int logY = barY + 68;
+            int logH = h - logY - 20;
             if (logH < 40) logH = 40;
             SetWindowPos(g_hLog, nullptr,
                 innerPad, logY, w - innerPad * 2, logH, SWP_NOZORDER);
@@ -1162,7 +1278,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
     wc.lpszClassName = L"AudioConverterClass";
     RegisterClass(&wc);
 
-    int width = 680, height = 600;
+    int width = 720, height = 660;
     int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
     int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
 
